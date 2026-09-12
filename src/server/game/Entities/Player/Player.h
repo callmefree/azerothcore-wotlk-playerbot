@@ -37,6 +37,7 @@
 #include "PlayerTaxi.h"
 #include "QuestDef.h"
 #include "SpellAuras.h"
+#include "SpellChargeState.h"
 #include "SpellInfo.h"
 #include "TradeData.h"
 #include "Unit.h"
@@ -187,6 +188,7 @@ struct SpellModifier
     int32 value;
     flag96 mask;
     uint32 spellId;
+    uint32 targetSpellId = 0; // Optional script constraint; zero retains normal family/mask targeting.
     Aura* const ownerAura;
 };
 
@@ -1446,7 +1448,7 @@ public:
     /***                    QUEST SYSTEM                   ***/
     /*********************************************************/
 
-    int32 GetQuestLevel(Quest const* quest) const { return quest && (quest->GetQuestLevel() > 0) ? quest->GetQuestLevel() : GetLevel(); }
+    int32 GetQuestLevel(Quest const* quest) const;
 
     void PrepareQuestMenu(ObjectGuid guid);
     void SendPreparedQuest(ObjectGuid guid);
@@ -1799,6 +1801,11 @@ public:
 
     [[nodiscard]] PlayerSpellMap const& GetSpellMap() const { return m_spells; }
     PlayerSpellMap&       GetSpellMap()       { return m_spells; }
+    // Transient action replacements; never written to character spell ownership.
+    void SetTemporarySpellReplacement(uint32 original, uint32 replacement);
+    [[nodiscard]] uint32 GetTemporarySpellReplacement(uint32 original) const;
+    [[nodiscard]] bool CanUseTwoHandWithShield(ItemTemplate const* main, ItemTemplate const* off) const;
+    [[nodiscard]] float GetMeleeAbilityRangeBonus() const;
 
     [[nodiscard]] SpellCooldowns const& GetSpellCooldownMap() const { return m_spellCooldowns; }
     SpellCooldowns&       GetSpellCooldownMap()       { return m_spellCooldowns; }
@@ -1837,6 +1844,14 @@ public:
     void RemoveAllSpellCooldown();
     void _LoadSpellCooldowns(PreparedQueryResult result);
     void _SaveSpellCooldowns(CharacterDatabaseTransaction trans, bool logout);
+    [[nodiscard]] SpellChargeState GetSpellCharges(SpellInfo const* spellInfo) const;
+    [[nodiscard]] bool HasStoredSpellCharges(SpellInfo const* spellInfo) const;
+    bool SetSpellCharges(SpellInfo const* spellInfo, SpellChargeState const& state);
+    void ConsumeSpellCharge(SpellInfo const* spellInfo, Spell* spell);
+    void RestoreSpellCharge(uint32 spellId, uint32 count = 1);
+    void RestoreSpellChargeCategory(uint32 categoryId, uint32 count);
+    void SendSpellChargeState(uint32 spellId) const;
+    void SendAllSpellChargeStates() const;
     uint32 GetLastPotionId() { return m_lastPotionId; }
     void SetLastPotionId(uint32 item_id) { m_lastPotionId = item_id; }
     void UpdatePotionCooldown(Spell* spell = nullptr);
@@ -1974,6 +1989,10 @@ public:
     void ApplySpellPenetrationBonus(int32 amount, bool apply);
     void UpdateResistances(uint32 school) override;
     void UpdateArmor() override;
+    float GetItemArmorBySubclass(uint32 subclass) const
+    {
+        return subclass < MAX_ITEM_SUBCLASS_ARMOR ? m_itemArmorBySubclass[subclass] : 0.0f;
+    }
     void UpdateMaxHealth() override;
     void UpdateMaxPower(Powers power) override;
     void ApplyFeralAPBonus(int32 amount, bool apply);
@@ -1984,6 +2003,7 @@ public:
     void ApplySpellHealingBonus(int32 amount, bool apply);
     void UpdateSpellDamageAndHealingBonus();
     void ApplyRatingMod(CombatRating cr, int32 value, bool apply);
+    void ApplyRatingHaste(CombatRating cr, float value);
     void UpdateRating(CombatRating cr);
     void UpdateAllRatings();
 
@@ -2122,6 +2142,30 @@ public:
     void learnSkillRewardedSpells(uint32 id, uint32 value);
 
     WorldLocation& GetTeleportDest() { return teleportStore_dest; }
+
+    // Ephemeral instances never replace ordinary dungeon bindings or saved login positions.
+    void PrepareScriptedPrivateInstance(uint32 mapId, WorldLocation const& returnLocation,
+        ObjectGuid owner = ObjectGuid::Empty, std::set<ObjectGuid> const& members = {})
+    {
+        _scriptedPrivateMapId = mapId;
+        _scriptedPrivateInstanceId = 0;
+        _scriptedPrivateReturn = returnLocation;
+        _scriptedPrivateOwner = owner.IsEmpty() ? GetGUID() : owner;
+        _scriptedPrivateMembers = members;
+        _scriptedPrivateMembers.insert(GetGUID());
+    }
+    void SetScriptedPrivateInstanceId(uint32 id) { _scriptedPrivateInstanceId = id; }
+    uint32 GetScriptedPrivateMapId() const { return _scriptedPrivateMapId; }
+    uint32 GetScriptedPrivateInstanceId() const { return _scriptedPrivateInstanceId; }
+    ObjectGuid GetScriptedPrivateOwner() const { return _scriptedPrivateOwner; }
+    std::set<ObjectGuid> const& GetScriptedPrivateMembers() const { return _scriptedPrivateMembers; }
+    WorldLocation const& GetScriptedPrivateReturn() const { return _scriptedPrivateReturn; }
+    void ClearScriptedPrivateInstance()
+    {
+        _scriptedPrivateMapId = _scriptedPrivateInstanceId = 0;
+        _scriptedPrivateOwner.Clear();
+        _scriptedPrivateMembers.clear();
+    }
     [[nodiscard]] bool IsBeingTeleported() const { return mSemaphoreTeleport_Near != 0 || mSemaphoreTeleport_Far != 0; }
     [[nodiscard]] bool IsBeingTeleportedNear() const { return mSemaphoreTeleport_Near != 0; }
     [[nodiscard]] bool IsBeingTeleportedFar() const { return mSemaphoreTeleport_Far != 0; }
@@ -2467,7 +2511,13 @@ public:
     void SetTemporaryUnsummonedPetNumber(uint32 petnumber) { m_temporaryUnsummonedPetNumber = petnumber; }
     void UnsummonPetTemporaryIfAny();
     void ResummonPetTemporaryUnSummonedIfAny();
-    [[nodiscard]] bool IsPetNeedBeTemporaryUnsummoned() const { return GetSession()->PlayerLogout() || !IsInWorld() || !IsAlive() || IsMounted()/*+in flight*/ || GetVehicle() || IsBeingTeleported(); }
+    [[nodiscard]] bool IsPetNeedBeTemporaryUnsummoned() const
+    {
+        bool mechsuit = getClass() == CLASS_TINKER && !IsInFlight() &&
+            HasAura(801384, GetGUID()) && HasAura(803451, GetGUID());
+        return GetSession()->PlayerLogout() || !IsInWorld() || !IsAlive() ||
+            (IsMounted() && !mechsuit) || GetVehicle() || IsBeingTeleported();
+    }
     bool CanResummonPet(uint32 spellid);
 
     void SendCinematicStart(uint32 CinematicSequenceId) const;
@@ -2680,6 +2730,7 @@ public:
 
     // Settings
     [[nodiscard]] PlayerSetting GetPlayerSetting(std::string const& source, uint32 index);
+    [[nodiscard]] PlayerSettingVector const* FindPlayerSettings(std::string const& source) const;
     void UpdatePlayerSetting(std::string const& source, uint32 index, uint32 value);
 
     void SendSystemMessage(std::string_view msg, bool escapeCharacters = false);
@@ -2820,6 +2871,12 @@ protected:
     void _SaveTalents(CharacterDatabaseTransaction trans);
     void _SaveStats(CharacterDatabaseTransaction trans);
     void _SaveCharacter(bool create, CharacterDatabaseTransaction trans);
+
+    uint32 _scriptedPrivateMapId = 0;
+    uint32 _scriptedPrivateInstanceId = 0;
+    WorldLocation _scriptedPrivateReturn;
+    ObjectGuid _scriptedPrivateOwner;
+    std::set<ObjectGuid> _scriptedPrivateMembers;
     void _SaveInstanceTimeRestrictions(CharacterDatabaseTransaction trans);
     void _SavePlayerSettings(CharacterDatabaseTransaction trans);
     void UpdateAdditionalSaves(uint32 p_time);
@@ -2875,6 +2932,7 @@ protected:
 
     PlayerMails m_mail;
     PlayerSpellMap m_spells;
+    std::map<uint32, uint32> m_temporarySpellReplacements;
     PlayerTalentMap m_talents;
     uint32 m_lastPotionId;                              // last used health/mana potion in combat, that block next potion use
 
@@ -2890,6 +2948,8 @@ protected:
     float m_auraBaseFlatMod[BASEMOD_END];
     float m_auraBasePctMod[BASEMOD_END];
     int32 m_baseRatingValue[MAX_COMBAT_RATING];
+    std::array<float, MAX_ITEM_SUBCLASS_ARMOR> m_itemArmorBySubclass{};
+    float m_appliedRatingHaste[CR_HASTE_SPELL - CR_HASTE_MELEE + 1] = {};
     uint32 m_baseSpellPower;
     uint32 m_baseSpellDamage;
     uint32 m_baseSpellHealing;
@@ -3079,6 +3139,7 @@ private:
     bool _wasOutdoor;
 
     PlayerSettingMap m_charSettingsMap;
+    void StoreSpellCharges(SpellInfo const* spellInfo, SpellChargeState const& state);
 
     Seconds m_creationTime;
 

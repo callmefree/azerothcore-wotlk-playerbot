@@ -1024,8 +1024,11 @@ SocketTimeOutTimeActive = 60000
 #        Default:     2  - (Enabled, Minimum value)
 #                     3+ - (Enabled, More checks before kick)
 #                     0  - (Disabled)
+#        Note:        Disabled here because the Ascension client pings far more often than
+#                     the stock client. Clients from AscensionCompat.TrustedNetworks also get
+#                     a shorter minimum ping interval, but this keeps the kick off for all.
 
-MaxOverspeedPings = 2
+MaxOverspeedPings = 0
 
 #
 #    DisconnectToleranceInterval

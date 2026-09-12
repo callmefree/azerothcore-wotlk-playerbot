@@ -23,6 +23,9 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     if (!m_reconnecting)
         m_stmts.resize(MAX_CHARACTERDATABASE_STATEMENTS);
 
+    // Read-only safety gate for the unregistered, never-saved Create probe.
+    PrepareStatement(CHAR_SEL_FRESH_CHECK_GUID_COUNT, "SELECT COUNT(*) FROM characters WHERE guid BETWEEN ? AND ?", CONNECTION_SYNCH);
+
     PrepareStatement(CHAR_DEL_QUEST_POOL_SAVE, "DELETE FROM pool_quest_save WHERE pool_id = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_INS_QUEST_POOL_SAVE, "INSERT INTO pool_quest_save (pool_id, quest_id) VALUES (?, ?)", CONNECTION_ASYNC);
     PrepareStatement(CHAR_DEL_NONEXISTENT_GUILD_BANK_ITEM, "DELETE FROM guild_bank_item WHERE guildid = ? AND TabId = ? AND SlotId = ?", CONNECTION_ASYNC);
@@ -649,6 +652,31 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     // By providing the realm ID explicitly, this ensures that mysql reverse proxy will use
     // correct realm database for the transaction.
     PrepareStatement(CHAR_NO_OP_PROVIDE_REALM_CONTEXT, "SELECT ? AS no_op", CONNECTION_ASYNC);
+
+    PrepareStatement(CHAR_SEL_MANASTORM_CLEARS, "SELECT mode, depth FROM ascension_manastorm_clear WHERE guid = ? UNION ALL SELECT 255, 0 ORDER BY mode, depth", CONNECTION_SYNCH);
+    // A duplicate first clear must fail the WHOLE transaction, including its reward mail.
+    PrepareStatement(CHAR_INS_MANASTORM_CLEAR, "INSERT INTO ascension_manastorm_clear (guid, mode, depth, scene, mail_id, completed_at) VALUES (?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_CLEARS, "DELETE FROM ascension_manastorm_clear WHERE guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_SEL_MANASTORM_BONUS, "SELECT mode, pity, caches FROM ascension_manastorm_bonus WHERE guid = ? UNION ALL SELECT 255, 0, 0", CONNECTION_SYNCH);
+    PrepareStatement(CHAR_REP_MANASTORM_BONUS, "REPLACE INTO ascension_manastorm_bonus (guid, mode, pity, caches) VALUES (?, ?, ?, ?)", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_BONUS, "DELETE FROM ascension_manastorm_bonus WHERE guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_SEL_MANASTORM_LOADOUT, "SELECT slot, spell FROM ascension_manastorm_loadout WHERE guid = ? UNION ALL SELECT 255, 0", CONNECTION_SYNCH);
+    PrepareStatement(CHAR_REP_MANASTORM_LOADOUT, "REPLACE INTO ascension_manastorm_loadout (guid, slot, spell) VALUES (?, ?, ?)", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_LOADOUT, "DELETE FROM ascension_manastorm_loadout WHERE guid = ?", CONNECTION_ASYNC);
+    // Mixing unsigned BIGINT with signed zero can yield DECIMAL; Field::Get<uint64>() needs binary BIGINT.
+    PrepareStatement(CHAR_SEL_MANASTORM_XP,
+        "SELECT CAST(COALESCE((SELECT amount FROM ascension_manastorm_xp WHERE guid = ?), 0) AS UNSIGNED)",
+        CONNECTION_SYNCH);
+    PrepareStatement(CHAR_ADD_MANASTORM_XP, "INSERT INTO ascension_manastorm_xp (guid, amount) VALUES (?, ?) ON DUPLICATE KEY UPDATE amount = amount + VALUES(amount)", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_CLAIM_MANASTORM_XP, "UPDATE ascension_manastorm_xp SET amount = amount - ? WHERE guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_XP, "DELETE FROM ascension_manastorm_xp WHERE guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_SEL_MANASTORM_CACHES, "SELECT ii.creatorGuid, ii.giftCreatorGuid, ii.count, ii.duration, ii.charges, ii.flags, ii.enchantments, ii.randomPropertyId, ii.durability, ii.playedTime, ii.text, mc.item, ii.itemEntry FROM ascension_manastorm_cache mc LEFT JOIN item_instance ii ON ii.guid = mc.item AND ii.owner_guid = mc.guid WHERE mc.guid = ? UNION ALL SELECT 0, 0, 0, 0, '', 0, '', 0, 0, 0, '', 0, 0 ORDER BY 12 LIMIT 4", CONNECTION_SYNCH);
+    PrepareStatement(CHAR_INS_MANASTORM_CACHE, "INSERT INTO ascension_manastorm_cache (item, guid) VALUES (?, ?)", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_CACHE, "DELETE FROM ascension_manastorm_cache WHERE item = ? AND guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_CACHES, "DELETE FROM ascension_manastorm_cache WHERE guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_MANASTORM_CACHE_ITEMS, "DELETE ii FROM item_instance ii INNER JOIN ascension_manastorm_cache mc ON mc.item = ii.guid AND mc.guid = ii.owner_guid WHERE mc.guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_INS_MANASTORM_CACHE_INVENTORY, "INSERT INTO character_inventory (guid, bag, slot, item) VALUES (?, ?, ?, ?)", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_SEL_MANASTORM_INVENTORY_ITEM, "SELECT COUNT(*) FROM character_inventory ci INNER JOIN item_instance ii ON ii.guid = ci.item AND ii.owner_guid = ci.guid WHERE ci.guid = ? AND ci.item = ?", CONNECTION_SYNCH);
 }
 
 CharacterDatabaseConnection::CharacterDatabaseConnection(MySQLConnectionInfo& connInfo) : MySQLConnection(connInfo)

@@ -137,3 +137,12 @@ e2e/go.work.sum
 
 .cache
 compile_commands.json
+
+# Keep the DBC continuation directory, but exclude its data files.
+!/env/dist/bin/
+/env/dist/bin/*
+!/env/dist/bin/data/
+/env/dist/bin/data/*
+!/env/dist/bin/data/dbc-continuations/
+/env/dist/bin/data/dbc-continuations/**
+!/env/dist/bin/data/dbc-continuations/.gitkeep

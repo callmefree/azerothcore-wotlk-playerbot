@@ -1114,7 +1114,11 @@ class spell_pal_lay_on_hands : public SpellScript
     {
         OnCheckCast += SpellCheckCastFn(spell_pal_lay_on_hands::CheckCast);
         AfterHit += SpellHitFn(spell_pal_lay_on_hands::HandleScript);
-        OnEffectHitTarget += SpellEffectFn(spell_pal_lay_on_hands::HandleMaxHealthHeal, EFFECT_0, SPELL_EFFECT_HEAL_MAX_HEALTH);
+        // HEAL_PCT already applies healing modifiers in the native effect handler.
+        SpellInfo const* info = sSpellMgr->AssertSpellInfo(m_scriptSpellId);
+        if (info->Effects[EFFECT_0].Effect != SPELL_EFFECT_HEAL_PCT)
+            OnEffectHitTarget += SpellEffectFn(spell_pal_lay_on_hands::HandleMaxHealthHeal,
+                EFFECT_0, SPELL_EFFECT_HEAL_MAX_HEALTH);
     }
 
     int32 _manaAmount;

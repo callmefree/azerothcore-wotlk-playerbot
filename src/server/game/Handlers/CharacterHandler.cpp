@@ -26,6 +26,7 @@
 #include "CharacterPackets.h"
 #include "Chat.h"
 #include "Common.h"
+#include "Config.h"
 #include "DatabaseEnv.h"
 #include "GameTime.h"
 #include "GitRevision.h"
@@ -53,6 +54,8 @@
 #include "SocialMgr.h"
 #include "SpellAuraEffects.h"
 #include "SpellAuras.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "StringConvert.h"
 #include "TC9Sidecar.h"
 #include "Tokenize.h"
@@ -62,6 +65,7 @@
 #include "WorldPacket.h"
 #include "WorldSession.h"
 #include "WorldSessionMgr.h"
+#include <unordered_set>
 
 LoginQueryHolder::LoginQueryHolder(uint32 accountId, ObjectGuid guid) : m_accountId(accountId), m_guid(guid)
 {
@@ -277,6 +281,15 @@ void WorldSession::HandleCharCreateOpcode(WorldPacket& recvData)
         >> createInfo->FacialHair
         >> createInfo->OutfitId;
 
+    if (createInfo->Class == 10 && IsAscensionCompatClient() &&
+        sConfigMgr->GetOption<bool>("AscensionCompat.MapClass10ToWarrior", false))
+    {
+        LOG_INFO("module.ascension_compat",
+            "Mapping Ascension class 10 to warrior for local character creation (account ID: {})",
+            GetAccountId());
+        createInfo->Class = CLASS_WARRIOR;
+    }
+
     if (!HasPermission(rbac::RBAC_PERM_SKIP_CHECK_CHARACTER_CREATION_TEAMMASK))
     {
         if (uint32 mask = sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED))
@@ -334,7 +347,7 @@ void WorldSession::HandleCharCreateOpcode(WorldPacket& recvData)
     if (!HasPermission(rbac::RBAC_PERM_SKIP_CHECK_CHARACTER_CREATION_CLASSMASK))
     {
         uint32 classMaskDisabled = sWorld->getIntConfig(CONFIG_CHARACTER_CREATING_DISABLED_CLASSMASK);
-        if ((1 << (createInfo->Class - 1)) & classMaskDisabled)
+        if ((uint32(1) << (createInfo->Class - 1)) & classMaskDisabled)
         {
             SendCharCreate(CHAR_CREATE_DISABLED);
             return;
@@ -600,7 +613,14 @@ void WorldSession::HandleCharCreateOpcode(WorldPacket& recvData)
                                     SendCharCreate(CHAR_CREATE_SUCCESS);
                                 }
                                 else
+                                {
+                                    LOG_ERROR("entities.player.character",
+                                        "Character creation save failed for account {}, guid {}, race {}, class {}. "
+                                        "The character transaction was rolled back; check preceding database errors.",
+                                        GetAccountId(), newChar->GetGUID().ToString(),
+                                        newChar->getRace(), newChar->getClass());
                                     SendCharCreate(CHAR_CREATE_ERROR);
+                                }
                             });
                     };
 
@@ -1219,7 +1239,7 @@ void WorldSession::HandlePlayerLoginToCharInWorld(Player* pCurrChar)
     for (uint16 Opcode = SMSG_SET_FLAT_SPELL_MODIFIER; Opcode <= SMSG_SET_PCT_SPELL_MODIFIER; ++Opcode) // PCT = FLAT+1
     {
         uint32 modType = (Opcode == SMSG_SET_FLAT_SPELL_MODIFIER) ? SPELLMOD_FLAT : SPELLMOD_PCT;
-        for (uint32 opType = SPELLMOD_DAMAGE; opType < MAX_SPELLMOD; ++opType)
+        for (uint32 opType = SPELLMOD_DAMAGE; opType < MAX_CLIENT_SPELLMOD; ++opType)
         {
             int32 i = 0;
             flag96 _mask = 0;
@@ -1227,25 +1247,83 @@ void WorldSession::HandlePlayerLoginToCharInWorld(Player* pCurrChar)
             if (spellMods.empty())
                 continue;
 
-            for (int32 eff = 0; eff < 96; ++eff)
+            bool const useAscensionSpellModifierLayout =
+                IsAscensionCompatClient() &&
+                sConfigMgr->GetOption<bool>("AscensionCompat.Enable", false);
+
+            if (useAscensionSpellModifierLayout)
             {
-                if (eff != 0 && eff % 32 == 0)
-                    _mask[i++] = 0;
-
-                _mask[i] = uint32(1) << (eff - (32 * i));
-                int32 val = 0;
+                std::unordered_set<uint32> families;
                 for (auto const& spellMod : spellMods)
-                    if (spellMod->type == modType && spellMod->mask & _mask)
-                        val += spellMod->value;
+                {
+                    if (spellMod->type == modType)
+                    {
+                        SpellInfo const* info = sSpellMgr->GetSpellInfo(spellMod->spellId);
+                        families.insert(info ? info->SpellFamilyName : 0);
+                    }
+                }
 
-                if (val == 0)
-                    continue;
+                for (uint32 family : families)
+                {
+                    int32 fi = 0;
+                    flag96 fmask = 0;
+                    for (int32 eff = 0; eff < 96; ++eff)
+                    {
+                        if (eff != 0 && eff % 32 == 0)
+                            fmask[fi++] = 0;
 
-                WorldPacket data(Opcode, (1 + 1 + 4));
-                data << uint8(eff);
-                data << uint8(opType);
-                data << int32(val);
-                SendPacket(&data);
+                        fmask[fi] = uint32(1) << (eff - (32 * fi));
+                        int32 val = 0;
+                        for (auto const& spellMod : spellMods)
+                        {
+                            if (spellMod->type == modType && (spellMod->mask & fmask))
+                            {
+                                SpellInfo const* info = sSpellMgr->GetSpellInfo(spellMod->spellId);
+                                uint32 const sFam = info ? info->SpellFamilyName : 0;
+                                if (sFam == family)
+                                    val += spellMod->value;
+                            }
+                        }
+
+                        if (val == 0)
+                            continue;
+
+                        // In Ascension's multi-class modifier engine, mode 0 (11 bytes) specifies
+                        // an individual modifier where the trailing uint32 is the SpellFamilyName
+                        // (e.g. 32 for Starcaller, 9 for Hunter), indexing client table slice:
+                        // SpellFamilyName * 0x11A0 + eff * 31 + opType.
+                        WorldPacket data(Opcode, 11);
+                        data << uint8(0);
+                        data << uint8(eff);
+                        data << uint8(opType);
+                        data << int32(val);
+                        data << uint32(family);
+                        SendPacket(&data);
+                    }
+                }
+            }
+            else
+            {
+                for (int32 eff = 0; eff < 96; ++eff)
+                {
+                    if (eff != 0 && eff % 32 == 0)
+                        _mask[i++] = 0;
+
+                    _mask[i] = uint32(1) << (eff - (32 * i));
+                    int32 val = 0;
+                    for (auto const& spellMod : spellMods)
+                        if (spellMod->type == modType && (spellMod->mask & _mask))
+                            val += spellMod->value;
+
+                    if (val == 0)
+                        continue;
+
+                    WorldPacket data(Opcode, 6);
+                    data << uint8(eff);
+                    data << uint8(opType);
+                    data << int32(val);
+                    SendPacket(&data);
+                }
             }
         }
     }

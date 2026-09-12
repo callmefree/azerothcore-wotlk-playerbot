@@ -17,6 +17,7 @@
 
 #include "DBCFileLoader.h"
 #include "Errors.h"
+#include <limits>
 #include <string.h>
 
 DBCFileLoader::DBCFileLoader() : recordSize(0), recordCount(0), fieldCount(0), stringSize(0), fieldsOffset(nullptr), data(nullptr), stringTable(nullptr) { }
@@ -203,6 +204,9 @@ char* DBCFileLoader::AutoProduceData(char const* format, uint32& records, char**
         for (uint32 y = 0; y < recordCount; ++y)
         {
             uint32 ind = getRecord(y).getUInt(i);
+            // The index table also needs the zero slot. UINT32_MAX would wrap its size to zero.
+            if (ind == std::numeric_limits<uint32>::max())
+                return nullptr;
             if (ind > maxi)
             {
                 maxi = ind;

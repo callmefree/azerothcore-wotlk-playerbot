@@ -124,6 +124,7 @@ private:
 
     TimePoint _LastPingTime;
     uint32 _OverSpeedPings;
+    std::chrono::seconds _minimumPingInterval{27};
 
     std::mutex _worldSessionLock;
     WorldSession* _worldSession;
@@ -138,6 +139,8 @@ private:
     std::string _ipCountry;
 
     bool _loggingPackets;
+    bool _loggedFirstClientHeader;
+    bool _ascensionCompatClient;
 };
 
 #endif

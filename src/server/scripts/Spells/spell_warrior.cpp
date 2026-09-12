@@ -298,11 +298,13 @@ class spell_warr_charge : public SpellScript
             });
     }
 
-    void HandleDummy(SpellEffIndex /*effIndex*/)
+    void HandleDummy(SpellEffIndex effIndex)
     {
         int32 chargeBasePoints0 = GetEffectValue();
         Unit* caster = GetCaster();
-        caster->CastCustomSpell(caster, SPELL_WARRIOR_CHARGE, &chargeBasePoints0, nullptr, nullptr, true);
+        // Ascension grants the rage directly with ENERGIZE; casting the stock helper would grant it twice.
+        if (GetSpellInfo()->Effects[effIndex].Effect == SPELL_EFFECT_DUMMY)
+            caster->CastCustomSpell(caster, SPELL_WARRIOR_CHARGE, &chargeBasePoints0, nullptr, nullptr, true);
 
         // Juggernaut crit bonus
         if (caster->HasAura(SPELL_WARRIOR_JUGGERNAUT_CRIT_BONUS_TALENT))
@@ -311,7 +313,12 @@ class spell_warr_charge : public SpellScript
 
     void Register() override
     {
-        OnEffectHitTarget += SpellEffectFn(spell_warr_charge::HandleDummy, EFFECT_1, SPELL_EFFECT_DUMMY);
+        SpellInfo const* info = sSpellMgr->AssertSpellInfo(m_scriptSpellId);
+        if (info->Effects[EFFECT_1].Effect == SPELL_EFFECT_ENERGIZE &&
+            info->Effects[EFFECT_1].MiscValue == POWER_RAGE)
+            OnEffectHitTarget += SpellEffectFn(spell_warr_charge::HandleDummy, EFFECT_1, SPELL_EFFECT_ENERGIZE);
+        else
+            OnEffectHitTarget += SpellEffectFn(spell_warr_charge::HandleDummy, EFFECT_1, SPELL_EFFECT_DUMMY);
     }
 };
 

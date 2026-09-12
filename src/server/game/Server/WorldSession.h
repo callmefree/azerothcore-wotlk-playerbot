@@ -34,6 +34,7 @@
 #include "Packet.h"
 #include "SharedDefines.h"
 #include "World.h"
+#include <atomic>
 #include <map>
 #include <memory>
 #include <utility>
@@ -555,6 +556,10 @@ public:
     bool DisallowHyperlinksAndMaybeKick(std::string_view str);
 
     void QueuePacket(WorldPacket* new_packet);
+
+    // Socket-thread extension requests carry a login-scoped token, never a Player pointer.
+    uint64 GetScriptPacketToken() const { return _scriptPacketToken.load(); }
+    void SetScriptPacketToken(uint64 token) { _scriptPacketToken.store(token); }
     bool Update(uint32 diff, PacketFilter& updater);
 
     /// Handle the authentication waiting queue (to be completed)
@@ -1232,6 +1237,10 @@ public:                                                 // opcodes handlers
         return _isBot;
     }
 
+    // Client from AscensionCompat.TrustedNetworks that uses the Ascension packet layouts.
+    [[nodiscard]] bool IsAscensionCompatClient() const { return _ascensionCompatClient; }
+    void SetAscensionCompatClient(bool ascensionCompatClient) { _ascensionCompatClient = ascensionCompatClient; }
+
 private:
     void ProcessQueryCallbacks();
 
@@ -1328,6 +1337,7 @@ private:
     uint32 recruiterId;
     bool isRecruiter;
     LockedQueue<WorldPacket*> _recvQueue;
+    std::atomic<uint64> _scriptPacketToken{0};
     uint32 m_currentVendorEntry;
     ObjectGuid m_currentBankerGUID;
     uint32 _offlineTime;
@@ -1349,6 +1359,7 @@ private:
     uint32 _orderCounter;
 
     bool _isBot;
+    bool _ascensionCompatClient = false;
 
     WorldSession(WorldSession const& right) = delete;
     WorldSession& operator=(WorldSession const& right) = delete;

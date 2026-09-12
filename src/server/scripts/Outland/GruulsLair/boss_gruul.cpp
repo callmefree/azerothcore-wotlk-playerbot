@@ -187,7 +187,7 @@ class spell_gruul_ground_slam : public SpellScript
     void Register() override
     {
         AfterCast += SpellCastFn(spell_gruul_ground_slam::ApplyStun);
-        OnEffectHitTarget += SpellEffectFn(spell_gruul_ground_slam::HandleScriptEffect, EFFECT_1, SPELL_EFFECT_SCRIPT_EFFECT);
+        OnEffectHitTarget += SpellEffectFn(spell_gruul_ground_slam::HandleScriptEffect, EFFECT_FIRST_FOUND, SPELL_EFFECT_SCRIPT_EFFECT);
     }
 };
 

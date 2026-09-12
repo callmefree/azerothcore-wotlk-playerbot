@@ -520,7 +520,7 @@ class spell_dk_improved_blood_presence_triggered : public AuraScript
     void Register() override
     {
         DoCheckProc += AuraCheckProcFn(spell_dk_improved_blood_presence_triggered::CheckProc);
-        OnEffectProc += AuraEffectProcFn(spell_dk_improved_blood_presence_triggered::HandleProc, EFFECT_1, SPELL_AURA_PROC_TRIGGER_SPELL);
+        OnEffectProc += AuraEffectProcFn(spell_dk_improved_blood_presence_triggered::HandleProc, EFFECT_FIRST_FOUND, SPELL_AURA_PROC_TRIGGER_SPELL);
     }
 };
 

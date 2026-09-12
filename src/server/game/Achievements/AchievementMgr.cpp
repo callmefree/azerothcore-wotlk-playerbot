@@ -48,6 +48,7 @@
 #include "World.h"
 #include "WorldPacket.h"
 #include "WorldSessionMgr.h"
+#include <unordered_set>
 
 bool AchievementCriteriaData::IsValid(AchievementCriteriaEntry const* criteria)
 {
@@ -112,7 +113,7 @@ bool AchievementCriteriaData::IsValid(AchievementCriteriaEntry const* criteria)
             }
             return true;
         case ACHIEVEMENT_CRITERIA_DATA_TYPE_T_PLAYER_CLASS_RACE:
-            if (classRace.class_id && ((1 << (classRace.class_id - 1)) & CLASSMASK_ALL_PLAYABLE) == 0)
+            if (classRace.class_id && ((uint32(1) << (classRace.class_id - 1)) & CLASSMASK_ALL_PLAYABLE) == 0)
             {
                 LOG_ERROR("sql.sql", "Table `achievement_criteria_data` (Entry: {} Type: {}) for data type ACHIEVEMENT_CRITERIA_DATA_TYPE_T_PLAYER_CLASS_RACE ({}) has non-existing class in value1 ({}), ignored.",
                                  criteria->ID, criteria->requiredType, dataType, classRace.class_id);
@@ -272,7 +273,7 @@ bool AchievementCriteriaData::IsValid(AchievementCriteriaEntry const* criteria)
                                  criteria->ID, criteria->requiredType, dataType);
                 return false;
             }
-            if (classRace.class_id && ((1 << (classRace.class_id - 1)) & CLASSMASK_ALL_PLAYABLE) == 0)
+            if (classRace.class_id && ((uint32(1) << (classRace.class_id - 1)) & CLASSMASK_ALL_PLAYABLE) == 0)
             {
                 LOG_ERROR("sql.sql", "Table `achievement_criteria_data` (Entry: {} Type: {}) for data type ACHIEVEMENT_CRITERIA_DATA_TYPE_S_PLAYER_CLASS_RACE ({}) has non-existing class in value1 ({}), ignored.",
                                  criteria->ID, criteria->requiredType, dataType, classRace.class_id);
@@ -627,7 +628,7 @@ void AchievementMgr::LoadFromDB(PreparedQueryResult achievementResult, PreparedQ
         do
         {
             Field* fields = achievementResult->Fetch();
-            uint32 achievementid = fields[0].Get<uint16>();
+            uint32 achievementid = fields[0].Get<uint32>();
 
             // must not happen: cleanup at server startup in sAchievementMgr->LoadCompletedAchievements()
             AchievementEntry const* achievement = sAchievementStore.LookupEntry(achievementid);
@@ -652,7 +653,7 @@ void AchievementMgr::LoadFromDB(PreparedQueryResult achievementResult, PreparedQ
         do
         {
             Field* fields = criteriaResult->Fetch();
-            uint32 id      = fields[0].Get<uint16>();
+            uint32 id      = fields[0].Get<uint32>();
             uint32 counter = fields[1].Get<uint32>();
             time_t date    = time_t(fields[2].Get<uint32>());
 
@@ -664,7 +665,7 @@ void AchievementMgr::LoadFromDB(PreparedQueryResult achievementResult, PreparedQ
 
                 CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_INVALID_ACHIEV_PROGRESS_CRITERIA);
 
-                stmt->SetData(0, uint16(id));
+                stmt->SetData(0, id);
 
                 CharacterDatabase.Execute(stmt);
 
@@ -2643,6 +2644,38 @@ void AchievementGlobalMgr::LoadAchievementCriteriaList()
         return;
     }
 
+    auto hasSupportedIndexes = [](AchievementCriteriaEntry const* criteria)
+    {
+        if (criteria->requiredType >= ACHIEVEMENT_CRITERIA_TYPE_TOTAL ||
+            (criteria->timeLimit && criteria->timedType >= ACHIEVEMENT_TIMED_TYPE_MAX))
+            return false;
+
+        for (auto const& requirement : criteria->additionalRequirements)
+            if (requirement.additionalRequirement_type >= ACHIEVEMENT_CRITERIA_CONDITION_TOTAL)
+                return false;
+
+        return true;
+    };
+
+    // Keep unsupported custom criteria out of every fixed-size lookup array. Exclude the whole
+    // achievement so that dropping one of its requirements cannot make it easier to complete.
+    std::unordered_set<uint32> unsupportedAchievements;
+    uint32 unsupportedCriteria = 0;
+    for (uint32 entryId = 0; entryId < sAchievementCriteriaStore.GetNumRows(); ++entryId)
+    {
+        AchievementCriteriaEntry const* criteria = sAchievementCriteriaStore.LookupEntry(entryId);
+        if (criteria && GetAchievement(criteria->referredAchievement) && !hasSupportedIndexes(criteria))
+        {
+            unsupportedAchievements.insert(criteria->referredAchievement);
+            ++unsupportedCriteria;
+        }
+    }
+
+    if (unsupportedCriteria)
+        LOG_ERROR("dbc", "Skipped {} unsupported achievement criteria across {} achievements; "
+            "those achievements are unavailable until their criteria are supported.",
+            unsupportedCriteria, unsupportedAchievements.size());
+
     uint32 loaded = 0;
     for (uint32 entryId = 0; entryId < sAchievementCriteriaStore.GetNumRows(); ++entryId)
     {
@@ -2655,6 +2688,9 @@ void AchievementGlobalMgr::LoadAchievementCriteriaList()
             LOG_DEBUG("server.loading", "Achievement {} referenced by criteria {} doesn't exist, criteria not loaded.", criteria->referredAchievement, criteria->ID);
             continue;
         }
+
+        if (unsupportedAchievements.contains(criteria->referredAchievement))
+            continue;
 
         _achievementCriteriasByType[criteria->requiredType].push_back(criteria);
         _achievementCriteriaListByAchievement[criteria->referredAchievement].push_back(criteria);
@@ -2975,7 +3011,7 @@ void AchievementGlobalMgr::LoadCompletedAchievements()
     {
         Field* fields = result->Fetch();
 
-        uint16 achievementId = fields[0].Get<uint16>();
+        uint32 achievementId = fields[0].Get<uint32>();
         AchievementEntry const* achievement = sAchievementStore.LookupEntry(achievementId);
         if (!achievement)
         {
@@ -2984,7 +3020,7 @@ void AchievementGlobalMgr::LoadCompletedAchievements()
 
             CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_INVALID_ACHIEVMENT);
 
-            stmt->SetData(0, uint16(achievementId));
+            stmt->SetData(0, achievementId);
             CharacterDatabase.Execute(stmt);
 
             continue;

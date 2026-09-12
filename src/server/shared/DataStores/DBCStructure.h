@@ -2182,9 +2182,9 @@ struct WMOAreaTableEntry
 
 struct WorldMapAreaEntry
 {
-    //uint32  ID;                                           // 0
+    uint32  ID;                                             // 0 index (WorldMapArea row ID, not AreaTable ID)
     uint32  map_id;                                         // 1
-    uint32  area_id;                                        // 2 index (continent 0 areas ignored)
+    int32   area_id;                                        // 2 -1 for Ascension maps without an AreaTable entry
     //char const* internal_name                             // 3
     float   y1;                                             // 4
     float   y2;                                             // 5

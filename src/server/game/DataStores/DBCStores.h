@@ -208,4 +208,11 @@ extern DBCStorage <WorldMapOverlayEntry>         sWorldMapOverlayStore;
 
 void LoadDBCStores(std::string const& dataPath);
 
+// Refresh secondary lookups after continuation rows replace or extend the loaded stores.
+void RebuildDbcDerivedIndexes();
+
+// Zone lookups must not use the WorldMapArea store's row-ID index.
+// Map-only rows with area_id == -1 remain in the store but have no zone lookup.
+WorldMapAreaEntry const* GetWorldMapAreaEntryByAreaID(uint32 areaId);
+
 #endif

@@ -9,21 +9,30 @@ AzerothCore is a C++ MMORPG server emulator for World of Warcraft 3.3.5a (WotLK)
 - Formatting follows `.editorconfig`: UTF-8, LF, max 120 cols, trailing newline, no trailing whitespace; 4-space indent for C++ (tabs forbidden), 2-space for JSON/YAML/sh/ts/js.
 - **Prefer live-stack e2e to debug/validate player-visible behaviour** when a local auth+world+MySQL stack is available (protocol, combat, quests, loot, death, multi-bot). See `e2e/README.md` and AzerothGhost `e2e/LLM_GUIDE.md`. Do not invent e2e for pure unit-sized logic — see `.agents/docs/e2e-policy.md`.
 - **Scratch e2e only under `e2e/local/`** (gitignored). Never commit throwaway debug tests. Promote keepers into `e2e/suites/` or `e2e/smoke/`.
-- Planning docs go in `.agents/plans/<task-slug>/` (gitignored), named `<task-slug>.<TYPE>.md` (`PLAN`, `REQUIREMENTS`, `ANALYSIS`, …).
+- Keep ordinary plans and results in the conversation. If a planning document is requested or necessary,
+  use `.agents/plans/<task-slug>/` (gitignored); no per-task document is required.
+- Use existing tools and the smallest relevant checks. Routine edits need no source snapshots, backup folders,
+  receipts, or standalone reports. Preserve unique untracked work and use Git diffs for tracked files.
+- A source-only task ends with the requested change and relevant checks. Builds, deployment, and in-game
+  acceptance are separate scopes. Repeat passing checks only after changes or a specific unresolved concern.
 
-## Mandatory reading per task
+## Task references
 
-Read the matching doc(s) BEFORE starting the task:
+Read the relevant sections when needed for the work. Do not read every guide or turn examples into extra tasks.
 
-- Compiling, configuring, or running tests → `.agents/docs/build.md`
+- Authorized CMake configuration/build or native test setup → `.agents/docs/build.md`
 - Writing or modifying C++ → `.agents/docs/cpp-guidelines.md`
   - Script work (under `src/server/scripts/`) → also `.agents/docs/cpp-scripts.md`
 - Creating or modifying SQL → `.agents/docs/sql-guidelines.md`
   - SmartAI work (`smart_scripts` data) → also `.agents/docs/cpp-scripts.md`
 - Reviewing a changeset or PR → `.agents/docs/code-review.md`
-- Self-reviewing, or opening or updating a PR → also `.agents/docs/self-review-rules.md`
-- Touching a subsystem that has a doc in `.agents/docs/systems/` → read that doc too
+- Preparing an actual PR → `.agents/docs/self-review-rules.md`
+- Subsystem-specific questions → the relevant section in `.agents/docs/systems/`
 - Writing, debugging, or changing live-stack e2e (`e2e/`) → `e2e/README.md`, `.agents/docs/e2e-policy.md`, and AzerothGhost `e2e/LLM_GUIDE.md` (scratch work → `e2e/local/`)
+- Ascension damage/healing, AP/RAP/SP coefficients, triggered spells or tooltip parity →
+  `.agents/docs/systems/ascension-spell-parity.md`
+- Local SQL/binary/client deployment, MPQ synchronization or deployment-verifier tests →
+  `.agents/docs/systems/ascension-local-deployment.md`
 - Capturing a lesson or adding/updating agent docs → `.agents/docs/README.md`
 
 ## Repository layout
@@ -46,6 +55,11 @@ Read the matching doc(s) BEFORE starting the task:
 
 External modules live in `modules/`, each a subdir with its own `CMakeLists.txt`. Disable with `-DDISABLED_AC_MODULES="mod1;mod2"`. See `modules/how_to_make_a_module.md`.
 
-## Persisting lessons
+In this private fork, `modules/mod-ascension-compat` is vendored into this repository, not a submodule
+or a separate working tree. `origin` is the private CoA fork; `upstream` is the original AzerothCore
+repository. Fetching upstream is separate from reviewing, merging, building or deploying its changes.
 
-When a user correction reveals a lesson that generalizes, offer to persist it into these docs (placement per `.agents/docs/README.md`): use the `/self-improve` skill if installed, otherwise suggest the user to install it and read this page: https://www.azerothcore.org/wiki/agentic-engineering
+## Maintaining guidance
+
+Keep only stable conventions and essential routing here. Update guidance when requested or when a durable
+correction is needed; do not automatically offer lesson capture, install skills, or append task histories.

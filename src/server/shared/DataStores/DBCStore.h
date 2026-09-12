@@ -88,6 +88,29 @@ public:
         _indexTable.AsT[id] = t;
     }
 
+    // Loaded entries belong to shared data blocks; never delete an individual old row.
+    void ReplaceEntry(uint32 id, T* entry)
+    {
+        if (id >= _indexTableSize)
+            EnsureCapacity(id + 1);
+
+        _indexTable.AsT[id] = entry;
+    }
+
+    // Reserve once before injecting a file to avoid reallocating for every new row.
+    void EnsureCapacity(uint32 minSize)
+    {
+        if (minSize <= _indexTableSize)
+            return;
+
+        char** newIndex = new char*[minSize]();
+        if (_indexTableSize)
+            memcpy(newIndex, _indexTable.AsChar, _indexTableSize * sizeof(char*));
+        delete[] reinterpret_cast<char*>(_indexTable.AsT);
+        _indexTable.AsChar = newIndex;
+        _indexTableSize = minSize;
+    }
+
     [[nodiscard]] uint32 GetNumRows() const { return _indexTableSize; }
 
     bool Load(char const* path) override

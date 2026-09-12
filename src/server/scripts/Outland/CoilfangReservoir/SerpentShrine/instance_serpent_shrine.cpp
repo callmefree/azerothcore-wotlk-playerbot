@@ -358,15 +358,16 @@ class spell_rancid_spore_cloud : public AuraScript
 {
     PrepareAuraScript(spell_rancid_spore_cloud);
 
-    void HandlePeriodic(AuraEffect const* /*aurEff*/)
+    void HandlePeriodic(AuraEffect const* aurEff)
     {
         PreventDefaultAction();
-        GetCaster()->CastSpell((Unit*)nullptr, GetSpellInfo()->Effects[EFFECT_0].TriggerSpell, true);
+        if (Unit* caster = GetCaster())
+            caster->CastSpell((Unit*)nullptr, aurEff->GetSpellInfo()->Effects[aurEff->GetEffIndex()].TriggerSpell, true);
     }
 
     void Register() override
     {
-        OnEffectPeriodic += AuraEffectPeriodicFn(spell_rancid_spore_cloud::HandlePeriodic, EFFECT_0, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
+        OnEffectPeriodic += AuraEffectPeriodicFn(spell_rancid_spore_cloud::HandlePeriodic, EFFECT_FIRST_FOUND, SPELL_AURA_PERIODIC_TRIGGER_SPELL);
     }
 };
 
