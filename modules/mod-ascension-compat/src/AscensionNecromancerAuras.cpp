@@ -106,7 +106,12 @@ class aura_ascension_necromancer_lifecycle : public AuraScript
                     for (Creature* minion : Minions(player))
                         minion->RemoveAurasDueToSpell(ward, player->GetGUID());
                 }
-            BuffArmy(player, id);
+            // Ward spells target the caster. Casting them at a minion reapplies the
+            // player's aura and recursively enters this handler. Copy the aura
+            // directly, as we do when a minion is summoned under an active ward.
+            for (Creature* minion : Minions(player))
+                if (Aura* copy = player->AddAura(id, minion))
+                    copy->SetDuration(GetAura()->GetDuration());
         }
         if (id == 500981 || id == 804371)
             Cast(player, player, 504747);
