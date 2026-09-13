@@ -988,6 +988,13 @@ public:
         };
 
         place(6603);
+        if (player->getClass() == CLASS_PALADIN)
+        {
+            // Nontraditional races may have no playercreateinfo_action layout.
+            // The DBC starter grants already teach these spells; only place known spells.
+            place(635);   // Holy Light (Rank 1)
+            place(21084); // Seal of Righteousness
+        }
         for (auto const& entry : AscensionCompatData::ClassSpells)
         {
             if (entry.ClassId == player->getClass() && entry.RequiredLevel == 1 &&
@@ -1003,6 +1010,9 @@ public:
     }
 
   void OnPlayerLogin(Player *player) {
+    if (player->getClass() == CLASS_PALADIN && !player->GetSession()->IsBot())
+        InitializeStarterActions(player);
+
     if (!IsAscensionCustomClass(player))
       return;
 
