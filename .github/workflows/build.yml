@@ -14,10 +14,10 @@ name: coa-bot-build
 # third-party variant, vladbr2000/coa-level255-exact, not part of v1.3).
 
 on:
-  push:
-    branches: [ "Playerbot" ]
-    paths-ignore:
-      - '.github/**'
+  # No push trigger: the sources are NOT in this repo (they come from
+  # jealous-sound/core@main + Zyth45/mod-playerbots@coa, checked out below).
+  # A push here only ever carries our own workflow/state files, and sync.yml
+  # already dispatches builds when the real upstream moves.
   schedule:
     - cron: '0 4 * * *'
   workflow_dispatch:
