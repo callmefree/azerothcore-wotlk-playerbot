@@ -1,4 +1,4 @@
-name: windows-build
+name: coa-bot-build
 
 # CoA Playerbot (callmefree/azerothcore-wotlk-playerbot) Windows x64 build.
 # Branch: Playerbot. Adapted from upstream jealous-sound/azerothcore-wotlk-playerbot windows_build.yml.
@@ -6,8 +6,12 @@ name: windows-build
 on:
   push:
     branches: [ "Playerbot" ]
+    paths-ignore:
+      - '.github/**'
   pull_request:
     branches: [ "Playerbot" ]
+    paths-ignore:
+      - '.github/**'
   schedule:
     - cron: '0 4 * * *'
   workflow_dispatch:
