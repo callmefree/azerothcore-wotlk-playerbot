@@ -1,20 +1,35 @@
 name: coa-bot-build
 
-# CoA Playerbot (callmefree/azerothcore-wotlk-playerbot) Windows x64 build.
-# Branch: Playerbot. Adapted from upstream jealous-sound/azerothcore-wotlk-playerbot windows_build.yml.
+# CoA Playerbots Windows x64 build — follows the REAL upstream of the running
+# CoA Bots v1.x (repack main-20260919-b3717c137 + mod-playerbots coa branch).
+#
+# Source combination (authoritative, from Zyth45/mod-playerbots README_COA.md):
+#   core   : jealous-sound/azerothcore-wotlk-coa  @ main        (carries bot hooks
+#            #3069 + crash fixes #3072/3075/3080/3083/3085 since 2026-09-17)
+#   module : Zyth45/mod-playerbots               @ coa          (CoA bot AI)
+# No core fork is needed any more; the module lives in modules/ which the core
+# .gitignore leaves alone.
+#
+# This workflow does NOT apply the level-255 patch set (that is a separate
+# third-party variant, vladbr2000/coa-level255-exact, not part of v1.3).
 
 on:
   push:
     branches: [ "Playerbot" ]
     paths-ignore:
       - '.github/**'
-  pull_request:
-    branches: [ "Playerbot" ]
-    paths-ignore:
-      - '.github/**'
   schedule:
     - cron: '0 4 * * *'
   workflow_dispatch:
+    inputs:
+      core_ref:
+        description: 'jealous-sound/azerothcore-wotlk-coa ref (branch/tag/sha)'
+        required: false
+        default: 'main'
+      module_ref:
+        description: 'Zyth45/mod-playerbots ref (branch/tag/sha)'
+        required: false
+        default: 'coa'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -22,27 +37,33 @@ concurrency:
 
 jobs:
   windows-build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.os }}
+    runs-on: windows-latest
+    name: windows-latest
     env:
       BOOST_ROOT: C:\local\boost_1_87_0
+      CORE_REF: ${{ github.event.inputs.core_ref || 'main' }}
+      MODULE_REF: ${{ github.event.inputs.module_ref || 'coa' }}
     steps:
-      - name: Checkout AzerothCore (CoA Playerbot)
-        uses: actions/checkout@v7
-
-      - name: Checkout Playerbot Module
+      - name: Checkout build driver (this repo)
         uses: actions/checkout@v7
         with:
-          repository: mod-playerbots/mod-playerbots
-          ref: ${{ github.ref_name == 'Playerbot' && 'master' || 'test-staging' }}
-          path: modules/mod-playerbots
+          path: driver
 
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2.13
+      - name: Checkout CoA core (jealous-sound, no fork needed)
+        uses: actions/checkout@v7
+        with:
+          repository: jealous-sound/azerothcore-wotlk-coa
+          ref: ${{ env.CORE_REF }}
+          fetch-depth: 0
+          path: source
+
+      - name: Checkout CoA playerbots module (Zyth45 coa branch)
+        uses: actions/checkout@v7
+        with:
+          repository: Zyth45/mod-playerbots
+          ref: ${{ env.MODULE_REF }}
+          path: source/modules/mod-playerbots
+
       - name: Cache Boost & MySQL
         uses: actions/cache@v6
         with:
@@ -50,6 +71,7 @@ jobs:
             C:\local\boost_1_87_0
             C:\tools\mysql\current
           key: winbuild-deps:boost-1.87.0:mysql-8.4.9
+
       - name: Configure OS
         shell: pwsh
         run: |
@@ -114,19 +136,30 @@ jobs:
           }
           "OPENSSL_ROOT_DIR=$opensslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Using OpenSSL at $opensslRoot"
+
+      - name: Record resolved source revisions
+        shell: bash
+        working-directory: source
+        run: |
+          echo "core   : $(git rev-parse HEAD)  ($(git describe --tags --always 2>/dev/null || echo no-tag))"
+          echo "module : $(git -C modules/mod-playerbots rev-parse HEAD)"
+
       - name: Build worldserver only
         shell: bash
+        working-directory: source
         run: |
           export CTOOLS_BUILD=all
           # authserver/dbimport 无变化，仅 configure + 单编 worldserver（含其依赖库），省编译时间。
           # 注意：本仓库 acore.sh 的构建目录是 var/build/obj（非上游旧版的 build/）。
           ./acore.sh compiler configure
           cmake --build var/build/obj --target worldserver --config RelWithDebInfo -j "$(nproc 2>/dev/null || echo 4)"
+
       - name: Collect worldserver artifact
         if: success()
         shell: bash
+        working-directory: source
         run: |
-          rm -rf artifact && mkdir -p artifact
+          rm -rf ../artifact && mkdir -p ../artifact
           WS=$(find var/build/obj -name worldserver.exe -path '*RelWithDebInfo*' 2>/dev/null | head -1)
           if [ -z "$WS" ]; then
             echo "worldserver.exe not found under var/build/obj; dumping any worldserver binaries:"
@@ -134,11 +167,12 @@ jobs:
             exit 1
           fi
           D=$(dirname "$WS")
-          cp "$D/worldserver.exe" artifact/
-          cp "$D/"*.dll artifact/ 2>/dev/null || true
-          [ -d "$D/configs" ] && cp -r "$D/configs" artifact/ || true
+          cp "$D/worldserver.exe" ../artifact/
+          cp "$D/"*.dll ../artifact/ 2>/dev/null || true
+          [ -d "$D/configs" ] && cp -r "$D/configs" ../artifact/ || true
           echo "Collected worldserver artifact from $D"
-          ls -la artifact
+          ls -la ../artifact
+
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
@@ -146,6 +180,7 @@ jobs:
           name: coa-bot-win64
           path: artifact/
           retention-days: 7
+
       - name: Open issue on build failure
         if: failure()
         shell: bash
@@ -154,5 +189,5 @@ jobs:
         run: |
           gh issue create --repo "$GITHUB_REPOSITORY" \
             --title "Windows build failed ($(date -u +%Y-%m-%d))" \
-            --body "The nightly/sync Windows build failed. Check the run logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --body "The CoA bots Windows build failed. Core ref: $CORE_REF, module ref: $MODULE_REF. Check the run logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --label "ci-failure" || true
