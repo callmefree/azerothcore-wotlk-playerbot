@@ -118,21 +118,37 @@ jobs:
         shell: bash
         run: |
           export CTOOLS_BUILD=all
-          # authserver/dbimport 无变化，仅 configure + 单编 worldserver（含其依赖库），省编译时间
+          # authserver/dbimport 无变化，仅 configure + 单编 worldserver（含其依赖库），省编译时间。
+          # 注意：本仓库 acore.sh 的构建目录是 var/build/obj（非上游旧版的 build/）。
           ./acore.sh compiler configure
-          cmake --build build --target worldserver --config RelWithDebInfo -j "$(nproc 2>/dev/null || echo 4)"
+          cmake --build var/build/obj --target worldserver --config RelWithDebInfo -j "$(nproc 2>/dev/null || echo 4)"
+      - name: Collect worldserver artifact
+        if: success()
+        shell: bash
+        run: |
+          rm -rf artifact && mkdir -p artifact
+          WS=$(find var/build/obj -name worldserver.exe -path '*RelWithDebInfo*' 2>/dev/null | head -1)
+          if [ -z "$WS" ]; then
+            echo "worldserver.exe not found under var/build/obj; dumping any worldserver binaries:"
+            find . -name 'worldserver*.exe' 2>/dev/null | head
+            exit 1
+          fi
+          D=$(dirname "$WS")
+          cp "$D/worldserver.exe" artifact/
+          cp "$D/"*.dll artifact/ 2>/dev/null || true
+          [ -d "$D/configs" ] && cp -r "$D/configs" artifact/ || true
+          echo "Collected worldserver artifact from $D"
+          ls -la artifact
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: coa-bot-win64
-          path: |
-            build/bin/RelWithDebInfo/worldserver.exe
-            build/bin/RelWithDebInfo/*.dll
-            build/bin/RelWithDebInfo/configs/
+          path: artifact/
           retention-days: 7
       - name: Open issue on build failure
         if: failure()
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
