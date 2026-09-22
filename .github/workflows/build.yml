@@ -110,11 +110,13 @@ jobs:
           }
           "OPENSSL_ROOT_DIR=$opensslRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Using OpenSSL at $opensslRoot"
-      - name: Build
+      - name: Build worldserver only
         shell: bash
         run: |
           export CTOOLS_BUILD=all
-          ./acore.sh compiler build
+          # authserver/dbimport 无变化，仅 configure + 单编 worldserver（含其依赖库），省编译时间
+          ./acore.sh compiler configure
+          cmake --build build --target worldserver --config RelWithDebInfo -j "$(nproc 2>/dev/null || echo 4)"
       - name: Upload build artifacts
         if: success()
         uses: actions/upload-artifact@v4
@@ -122,8 +124,6 @@ jobs:
           name: coa-bot-win64
           path: |
             build/bin/RelWithDebInfo/worldserver.exe
-            build/bin/RelWithDebInfo/authserver.exe
-            build/bin/RelWithDebInfo/dbimport.exe
             build/bin/RelWithDebInfo/*.dll
             build/bin/RelWithDebInfo/configs/
           retention-days: 7
