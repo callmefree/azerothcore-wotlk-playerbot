@@ -32,8 +32,12 @@ on:
         default: 'coa'
 
 concurrency:
+  # Builds are expensive (~30-60 min on a Windows runner) and each one consumes
+  # CI minutes. Queue them instead of cancelling: a build that is already
+  # running should finish and upload its artifact rather than be killed by a
+  # newer dispatch. Only one build per branch runs at a time.
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   windows-build:
