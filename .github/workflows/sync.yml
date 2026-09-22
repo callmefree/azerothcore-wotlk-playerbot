@@ -1,7 +1,9 @@
 name: sync-upstream
 
 # Pull updates from jealous-sound/azerothcore-wotlk-playerbot (branch Playerbot) into this fork and push.
-# Uses PAT (not GITHUB_TOKEN) so the push triggers the windows-build workflow.
+# Uses PAT (not GITHUB_TOKEN) so the push triggers the coa-bot-build workflow.
+# After merging upstream, any upstream CI files re-added by the merge are stripped back out,
+# keeping ONLY our build.yml + sync.yml (bot-only strategy to save CI minutes).
 
 on:
   schedule:
@@ -42,6 +44,22 @@ jobs:
           else
             git merge --abort
             echo "status=conflict" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Drop upstream CI re-added by merge (keep only build/sync)
+        if: steps.merge.outputs.status == 'ok'
+        run: |
+          shopt -s nullglob
+          for f in .github/workflows/*; do
+            case "$(basename "$f")" in
+              build.yml|sync.yml) continue;;
+            esac
+            git rm -f "$f" || true
+          done
+          if git diff --cached --quiet; then
+            echo "no upstream CI re-added; nothing to clean"
+          else
+            git commit -m "chore: keep only build/sync workflows after upstream merge"
           fi
 
       - name: Push to fork
