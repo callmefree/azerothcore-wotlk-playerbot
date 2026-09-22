@@ -1,79 +1,110 @@
 name: sync-upstream
 
-# Pull updates from jealous-sound/azerothcore-wotlk-playerbot (branch Playerbot) into this fork and push.
-# Uses PAT (not GITHUB_TOKEN) so the push triggers the coa-bot-build workflow.
-# After merging upstream, any upstream CI files re-added by the merge are stripped back out,
-# keeping ONLY our build.yml + sync.yml (bot-only strategy to save CI minutes).
+# Watch the REAL upstream sources of the running CoA Bots v1.x and trigger the
+# build whenever either of them moves.
+#
+# The sources are NOT carried by this fork any more (see build.yml):
+#   core   : jealous-sound/azerothcore-wotlk-coa  @ main   (bot hooks + crash fixes)
+#   module : Zyth45/mod-playerbots               @ coa    (CoA bot AI)
+#
+# So "sync" no longer merges upstream into this repo. It polls the two upstream
+# HEADs, compares them against the last built revisions recorded here, and
+# dispatches coa-bot-build with the exact refs when something changed.
+#
+# A state file (last-built.json) is committed back so the comparison survives
+# across runs without needing any third-party cache.
 
 on:
   schedule:
     - cron: '30 3 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  actions: write
   issues: write
 
 jobs:
-  sync:
+  watch:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout fork (Playerbot)
         uses: actions/checkout@v7
         with:
           token: ${{ secrets.PAT }}
-          fetch-depth: 0
           ref: Playerbot
 
-      - name: Configure git
+      - name: Resolve upstream HEADs
+        id: head
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
         run: |
-          git config user.name "github-actions[bot]"
+          set -euo pipefail
+          CORE=$(gh api repos/jealous-sound/azerothcore-wotlk-coa/branches/main --jq .commit.sha)
+          MOD=$(gh api repos/Zyth45/mod-playerbots/branches/coa --jq .commit.sha)
+          echo "core=$CORE"   >> "$GITHUB_OUTPUT"
+          echo "module=$MOD"  >> "$GITHUB_OUTPUT"
+          echo "Upstream core   main : $CORE"
+          echo "Upstream module coa  : $MOD"
+
+      - name: Compare with last built revisions
+        id: cmp
+        run: |
+          set -euo pipefail
+          CORE='${{ steps.head.outputs.core }}'
+          MOD='${{ steps.head.outputs.module }}'
+          PREV_CORE=""; PREV_MOD=""
+          if [ -f last-built.json ]; then
+            PREV_CORE=$(python3 -c "import json;print(json.load(open('last-built.json')).get('core',''))")
+            PREV_MOD=$(python3 -c "import json;print(json.load(open('last-built.json')).get('module',''))")
+          fi
+          echo "previous core  : ${PREV_CORE:-<none>}"
+          echo "previous module: ${PREV_MOD:-<none>}"
+          if [ "$CORE" = "$PREV_CORE" ] && [ "$MOD" = "$PREV_MOD" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No upstream change since the last build."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream moved; a build will be dispatched."
+          fi
+
+      - name: Dispatch the build with the resolved refs
+        if: steps.cmp.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PAT }}
+        run: |
+          set -euo pipefail
+          gh workflow run build.yml \
+            --repo callmefree/azerothcore-wotlk-playerbot \
+            --ref Playerbot \
+            -f core_ref='${{ steps.head.outputs.core }}' \
+            -f module_ref='${{ steps.head.outputs.module }}'
+          echo "Dispatched coa-bot-build for core=${{ steps.head.outputs.core }} module=${{ steps.head.outputs.module }}"
+
+      - name: Record the revisions we just built
+        if: steps.cmp.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          printf '{\n  "core": "%s",\n  "module": "%s",\n  "recordedAt": "%s"\n}\n' \
+            '${{ steps.head.outputs.core }}' \
+            '${{ steps.head.outputs.module }}' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > last-built.json
+          git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Add upstream & fetch
-        run: |
-          git remote add upstream https://github.com/jealous-sound/azerothcore-wotlk-playerbot.git \
-            || git remote set-url upstream https://github.com/jealous-sound/azerothcore-wotlk-playerbot.git
-          git fetch upstream Playerbot
-
-      - name: Merge upstream/Playerbot
-        id: merge
-        run: |
-          if git merge --no-edit upstream/Playerbot; then
-            echo "status=ok" >> "$GITHUB_OUTPUT"
-          else
-            git merge --abort
-            echo "status=conflict" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Drop upstream CI re-added by merge (keep only build/sync)
-        if: steps.merge.outputs.status == 'ok'
-        run: |
-          shopt -s nullglob
-          for f in .github/workflows/*; do
-            case "$(basename "$f")" in
-              build.yml|sync.yml) continue;;
-            esac
-            git rm -f "$f" || true
-          done
-          if git diff --cached --quiet; then
-            echo "no upstream CI re-added; nothing to clean"
-          else
-            git commit -m "chore: keep only build/sync workflows after upstream merge"
-          fi
-
-      - name: Push to fork
-        if: steps.merge.outputs.status == 'ok'
-        run: |
+          git add last-built.json
+          git commit -m "chore(sync): record built core=${{ steps.head.outputs.core }} module=${{ steps.head.outputs.module }}"
           git push https://x-access-token:${{ secrets.PAT }}@github.com/callmefree/azerothcore-wotlk-playerbot.git Playerbot
 
-      - name: Open issue on conflict
-        if: steps.merge.outputs.status == 'conflict'
+      - name: Open issue if the upstream watch failed
+        if: failure()
         env:
           GH_TOKEN: ${{ secrets.PAT }}
         run: |
           gh issue create --repo callmefree/azerothcore-wotlk-playerbot \
-            --title "Sync conflict with upstream Playerbot" \
-            --body "Automated sync from jealous-sound/azerothcore-wotlk-playerbot hit a merge conflict. Please resolve manually, then re-run this workflow." \
+            --title "Upstream watch failed ($(date -u +%Y-%m-%d))" \
+            --body "The upstream watch could not resolve or dispatch. Check the run logs: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --label "sync-conflict" || true
-          exit 1
