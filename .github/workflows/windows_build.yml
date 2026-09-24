@@ -131,7 +131,7 @@ jobs:
           } else { Write-Host "WARN: no libmysql.dll under C:\Program Files\MySQL" }
           $osslDir = $env:OPENSSL_ROOT_DIR
           if ($osslDir -and (Test-Path $osslDir)) {
-            Get-ChildItem $osslDir -Recurse -Include libcrypto-3-x64.dll,libssl-3-x64.dll -ErrorAction SilentlyContinue | Select-Object -First 2 | ForEach-Object {
+            Get-ChildItem $osslDir -Recurse -Include libcrypto-3-x64.dll,libssl-3-x64.dll,legacy.dll -ErrorAction SilentlyContinue | Select-Object -First 3 | ForEach-Object {
               Copy-Item $_.FullName $stage -Force
               Write-Host "Packaged $($_.Name) from $($_.FullName)"
             }
