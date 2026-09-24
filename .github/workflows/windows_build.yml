@@ -120,6 +120,22 @@ jobs:
           $bin | ForEach-Object { Copy-Item $_.FullName $stage -Force }
           $etc = Join-Path $env:GITHUB_WORKSPACE 'env/dist/etc'
           if (Test-Path $etc) { Get-ChildItem $etc -Filter *.conf.dist | Copy-Item -Destination $stage -Force }
+          # Runtime DLLs must match the exact libs the build linked against.
+          # The image's preinstalled MySQL (not C:\tools\mysql) is what CMake found.
+          $mysqlDll = Get-ChildItem 'C:\Program Files\MySQL' -Recurse -Filter libmysql.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($mysqlDll) {
+            Copy-Item $mysqlDll.FullName $stage -Force
+            Write-Host "Packaged libmysql.dll from $($mysqlDll.FullName)"
+            $ver = (Get-Item $mysqlDll.FullName).VersionInfo.ProductVersion
+            Write-Host "libmysql version: $ver"
+          } else { Write-Host "WARN: no libmysql.dll under C:\Program Files\MySQL" }
+          $osslDir = $env:OPENSSL_ROOT_DIR
+          if ($osslDir -and (Test-Path $osslDir)) {
+            Get-ChildItem $osslDir -Recurse -Include libcrypto-3-x64.dll,libssl-3-x64.dll -ErrorAction SilentlyContinue | Select-Object -First 2 | ForEach-Object {
+              Copy-Item $_.FullName $stage -Force
+              Write-Host "Packaged $($_.Name) from $($_.FullName)"
+            }
+          } else { Write-Host "WARN: OPENSSL_ROOT_DIR not set, cannot package OpenSSL DLLs" }
           Get-ChildItem $stage | Select-Object Name,Length | Format-Table -AutoSize | Out-String | Write-Host
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
