@@ -15,8 +15,10 @@ name: sync-upstream
 # across runs without needing any third-party cache.
 
 on:
-  schedule:
-    - cron: '30 3 * * *'
+  # [disabled 2026-11-24] nightly auto-build turned off by owner request.
+  # Restore by un-commenting the two lines below (cron '30 3 * * *' = 04:00/03:30 UTC).
+  # schedule:
+  #   - cron: '30 3 * * *'
   workflow_dispatch:
 
 concurrency:
