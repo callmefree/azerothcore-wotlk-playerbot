@@ -18,8 +18,10 @@ on:
   # jealous-sound/core@main + Zyth45/mod-playerbots@coa, checked out below).
   # A push here only ever carries our own workflow/state files, and sync.yml
   # already dispatches builds when the real upstream moves.
-  schedule:
-    - cron: '0 4 * * *'
+  # [disabled 2026-11-24] nightly auto-build turned off by owner request.
+  # Restore by un-commenting the two lines below (cron '0 4 * * *' = 04:00/03:30 UTC).
+  # schedule:
+  #   - cron: '0 4 * * *'
   workflow_dispatch:
     inputs:
       core_ref:
